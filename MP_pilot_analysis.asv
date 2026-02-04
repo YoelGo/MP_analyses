@@ -1,0 +1,8 @@
+%% loading in LSL file and preprocessing the data
+clc; clear all; close all;
+cd('C:\Users\yoelgo\Documents\GitHub\MP_analyses\');
+addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\extra_functions\');
+env = setupEnviroment11();
+
+%%
+dat = load(env.data.cleanFiles{1})
