@@ -2,10 +2,13 @@ function [env] = setupEnviroment11()
 
 %%%%% these paths need to be adjusted %%%%%
 dataAyelet          = 'Z:\'
-localPath           = 'C:\Users\yoelgo\Desktop\Local_Yoel\'
-analysis_dir        = 'Z:\Experiments\Yoel\MP_pilot_analysis\';
-fieldtrip_path      = [localPath '\Beat_It_Analysis\fieldtrip-20250106\'];
-layout_path         = [analysis_dir 'landaulab_layout_62_P9-10.mat'];
+yoelpath            = [dataAyelet 'Experiments\Yoel\'];
+toolsPath           = [yoelpath 'tools\'];
+analysis_dir        = [yoelpath 'MP_pilot_analysis\'];
+fieldtrip_path      = [toolsPath 'fieldtrip-20250106\'];
+LAVI_path           = [toolsPath 'LAVI\'];
+%layout_path        = [toolsPath 'landaulab_layout_62_P9-10.mat'];
+layout_path         = [toolsPath 'mbt32ch_layout.mat'];
 
 expdir              = [dataAyelet 'Experiments\MP_JointAction\'];
 datadir             = [expdir 'data\'];
@@ -23,9 +26,10 @@ ft_defaults;
 %%%%% innitiate env (envelope) variable %%%%%
 %%% set paths
 env.paths.rawData   = datadir;
-env.paths.cleanData  = [analysis_dir 'preproc\clean\'];
+env.paths.cleanData = [analysis_dir 'preproc\clean\'];
 env.paths.artifacts = [analysis_dir 'preproc\artifacts\'];
 env.paths.pltOut    = [analysis_dir 'plots\'];
+env.paths.LAVIpath        = LAVI_path;
 
 %%% set data variables
 %env.data.cleanID         = cellfun(@(x) regexprep(x.ID, '_.*', ''), env.data.dfLAVI, 'UniformOutput', false);
@@ -69,5 +73,5 @@ env.plt.lightBlue    = [152, 207, 222]/255;
 env.plt.lilac        = [185, 150, 197]/255;
 env.plt.peach        = [243, 212, 184]/255;
 
-
+addpath(env.paths.LAVIpath)
 end

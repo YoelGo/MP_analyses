@@ -1,59 +1,77 @@
-function [data_win] = NaN_windowing(cfg, data)
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Split data into windows and expluce any window that contains NaN for
-% fft or LAVI purposes.
+function [data_win, windowSummary] = NaN_windowing(cfg, data)
+% Split FieldTrip data into windows and remove NaN windows
 %
-% variables:
-% cfg.winlen = length of each divided window (sec)
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% cfg.winlen  - window length (sec)
+% cfg.overlap - percent overlap (0–99). If 0 or missing → no overlap.
 
-% ====== split each trial into windows ======
-fsample  = data.fsample;      % sampling rate
-winSamp  = round(cfg.winlen*fsample);
+fs   = data.fsample;
+wlen = round(cfg.winlen * fs);
 
-trl_all = [];
-
-begSamp = all_table.beg_sample(row);
-endSamp = all_table.end_sample(row);
-starts = begSamp:winSamp:endSamp-winSamp;
-for st = starts
-    en = st+winSamp-1;
-    trl_all = [trl_all; st en 0];
-end
-
-if isempty(trl_all)
-    warning('No 5s windows for subj %s, bps=%d, loc=%d', subjID, bpsid, locv);
-    % log empty row
-    newRow = {subjID, bpsid, locv, 0, 0, 0};
-    windowLog = [windowLog; newRow];
-end
-
-total_windows = size(trl_all,1);
-
-cfg = [];
-cfg.trl = trl_all;
-data_win = ft_redefinetrial(cfg, data);
-
-% ====== exclude windows containing NaNs ======
-keep = true(1,numel(data_win.trial));
-for tr = 1:numel(data_win.trial)
-    if any(isnan(data_win.trial{tr}(:)))
-        keep(tr) = false;
+% -------- overlap handling --------
+if ~isfield(cfg,'overlap') || cfg.overlap == 0
+    stepSamp = wlen;   % exact non-overlapping windows
+else
+    if cfg.overlap < 0 || cfg.overlap >= 100
+        error('cfg.overlap must be between 0 and <100');
     end
+    stepSamp = round(wlen * (1 - cfg.overlap/100));
+    stepSamp = max(stepSamp,1); % safety
 end
-removed_windows = sum(~keep);
-remaining_windows = total_windows - removed_windows;
+% ----------------------------------
 
-data_win.trial = data_win.trial(keep);
-data_win.time  = data_win.time(keep);
+data_win = [];
+data_win.label   = data.label;
+data_win.fsample = fs;
+data_win.trial   = {};
+data_win.time    = {};
+data_win.sampleinfo = [];
+data_win.trialinfo  = [];
 
-% log into table
-newRow = {subjID, bpsid, locv, total_windows, removed_windows, remaining_windows};
-windowLog = [windowLog; newRow];
+nTrials = numel(data.trial);
+totalW = zeros(nTrials,1);
+keptW  = zeros(nTrials,1);
+
+winCount = 0;
+
+for t = 1:nTrials
+
+    trialData = data.trial{t};
+    nSamples  = size(trialData,2);
+
+    starts = 1:stepSamp:(nSamples - wlen + 1);
+    totalW(t) = numel(starts);
+
+    for w = 1:numel(starts)
+
+        beg = starts(w);
+        fin = beg + wlen - 1;
+
+        segment = trialData(:,beg:fin);
+
+        % reject NaN windows
+        if any(isnan(segment(:)))
+            continue
+        end
+
+        keptW(t) = keptW(t) + 1;
+        winCount = winCount + 1;
+        data_win.trial{winCount} = segment;
+        data_win.time{winCount}  = (0:wlen-1)/fs;
+        data_win.sampleinfo(winCount,:) = [beg fin];
+        data_win.trialinfo(winCount,:)  = [t w];
+    end 
+end
+
+% ----- summary table -----
+removedW = totalW - keptW;
+percentRemoved = 100 * removedW ./ max(totalW,1);
+
+windowSummary = table( ...
+    (1:nTrials)', totalW, keptW, removedW, percentRemoved, ...
+    'VariableNames', {'trial','total_windows','kept_windows','removed_windows','percent_removed'});
 
 if isempty(data_win.trial)
-    warning('All windows contained NaNs for subj %s, bps=%d, loc=%d', subjID, bpsid, locv);
+    warning('No valid windows remained after NaN rejection.');
 end
+display(windowSummary)
 end
