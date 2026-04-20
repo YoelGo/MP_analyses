@@ -5,11 +5,15 @@ addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\extra_functions\');
 env = setupEnviroment11();
 
 %% Load single participant
-n = 7;
+n = 1;
 ID = extractBefore(env.data.rawFiles(n).name, '_data');
 env.ID = ID;
 env.paths.curData = [env.data.rawFiles(n).folder '\'];
-dat1 = load_xdf([env.paths.curData  env.data.rawFiles(n).name]);
+%%
+cfg = [];
+cfg.dataset = [env.paths.curData  env.data.rawFiles(n).name]
+dat1 = ft_preprocessing(cfg);
+%dat1 = load_xdf([env.paths.curData  env.data.rawFiles(n).name]);
 
 clear csv;
 %% divide into streams

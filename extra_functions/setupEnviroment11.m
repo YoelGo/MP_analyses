@@ -33,7 +33,7 @@ env.paths.LAVIpath        = LAVI_path;
 
 %%% set data variables
 %env.data.cleanID         = cellfun(@(x) regexprep(x.ID, '_.*', ''), env.data.dfLAVI, 'UniformOutput', false);
-env.data.rawFiles        = dir(fullfile(env.paths.rawData, '**', '*.xdf'));
+env.data.rawFiles        = dir(fullfile(env.paths.rawData, '**', '*.fif'));
 env.data.rawFileNames    = {env.data.rawFiles.name};    
 env.data.cleanFiles      = dir(fullfile(env.paths.cleanData, '**', '*.mat'));
 env.data.cleanFileNames  = {env.data.cleanFiles.name};    
