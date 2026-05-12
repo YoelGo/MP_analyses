@@ -5,20 +5,17 @@ addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\MirorPods_Pilot1\extra_fun
 env = setupEnviroment11();
 
 %% Load single participant
-n = 2;
+n = 3;
 ID = extractBefore(env.data.rawFiles(n).name, '_data');
 env.ID = ID;
 env.paths.curData = [env.data.rawFiles(n).folder '\'];
-
+%%
 cfg = [];
 cfg.dataset = [env.paths.curData  env.data.rawFiles(n).name]
-
-% for .fif files %
 %dat1 = ft_preprocessing(cfg);
-
-% for .xdf files %
 dat1 = load_xdf([env.paths.curData  env.data.rawFiles(n).name]);
 
+clear csv;
 %% divide into streams
 % EEG of player 1 and 2
 EEG1    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player1 EEG'), dat1)};
@@ -26,16 +23,14 @@ EEG2    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player2 EEG'), dat1)};
 
 % convert LSL stream to fieldtrip data
 ftEEG1 = LSL2ft(EEG1);
-ftEEG2 = LSL2ft(EEG2);
 
 % markers
 markers = dat1(cellfun(@(x) strcmp(x.info.name, 'MaxMarkers'), dat1));
 markers = markers{1};
-%% first look at the data
+%%
 cfg = [];
-cfg.ylim  = [-130 130];
-cfg.blocksize = 50;
-ft_databrowser(cfg, ftEEG1)
+cfg.channel = 31;
+ft_databrowser([], ftEEG1)
 %%
 fs = EEG1.info.effective_srate;
 idxBeg  = find(strcmp(markers.time_series, 'Background Noise start'));
@@ -55,7 +50,7 @@ trlTable.beeps     = [1, 0, 1, 0, 1, 0, 1, 0]';
 trlTable1 = trlTable(1:4,:);
 trlTable2 = trlTable(5:end,:);
 
-%% redefine trials
+%% convert to ft data and redefine trials
 % redifine trials
 cfg = [];
 cfg.trl = trlTable1{:,:};
