@@ -1,18 +1,14 @@
 %% loading in LSL file and preprocessing the data
 clc; clear all; close all;
-cd('C:\Users\yoelgo\Documents\GitHub\MP_analyses\MirorPods_Pilot1\');
-addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\MirorPods_Pilot1\extra_functions\');
+cd('C:\Users\yoelgo\Documents\GitHub\MP_analyses\');
+addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\extra_functions\');
 env = setupEnviroment11();
 
 %% Load single participant
-n = 3;
+n = 7;
 ID = extractBefore(env.data.rawFiles(n).name, '_data');
 env.ID = ID;
 env.paths.curData = [env.data.rawFiles(n).folder '\'];
-%%
-cfg = [];
-cfg.dataset = [env.paths.curData  env.data.rawFiles(n).name]
-%dat1 = ft_preprocessing(cfg);
 dat1 = load_xdf([env.paths.curData  env.data.rawFiles(n).name]);
 
 clear csv;
@@ -21,18 +17,56 @@ clear csv;
 EEG1    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player1 EEG'), dat1)};
 EEG2    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player2 EEG'), dat1)};
 
-% convert LSL stream to fieldtrip data
-ftEEG1 = LSL2ft(EEG1);
-
 % markers
 markers = dat1(cellfun(@(x) strcmp(x.info.name, 'MaxMarkers'), dat1));
 markers = markers{1};
+
+% Find txt files containing "Noise"
+txt = dir(fullfile(env.data.rawFiles(n).folder, '**', '*Noise*.txt'));
+
+txtFiles = cell(numel(txt),1);
+%
+clc;
+fs = str2double(EEG1.info.nominal_srate);
+gap = max(1,round(0.7*fs));
+
+for f = 1:numel(txt)
+
+    % ---------- read ----------
+    T = readtable(fullfile(txt(f).folder, txt(f).name));
+    T.(T.Properties.VariableNames{1}) = str2double(string(T.(T.Properties.VariableNames{1})));
+  
+    % ---------- basic columns ----------
+    T = table( ...
+        T.Var1/1000*fs, ...
+        T.Var14, ...
+        T.Var10, ...
+        'VariableNames',{'samples500','bpm','beeps'});
+
+    % ---------- rhythm ----------
+    b = T.beeps>0;
+    T.rhythm = movmin(movmax(b,[gap 0]),[0 gap]);
+    T.rhythm(1) = T.rhythm(2);
+
+    % ---------- keep only state changes ----------
+    change = [false; diff(T.rhythm)~=0 | diff(T.bpm)~=0];
+    change(1)=true; change(end)=true;
+
+    Tabv = T(change,{'samples500','bpm','rhythm'});
+    Tabv.Properties.VariableNames{1} = 'beg_sample';
+    % ---------- build intervals ----------
+
+    Tabv.end_sample = [Tabv.beg_sample(2:end)-10; 0];
+    Tabv(end,:) = [];
+    Tabv.duration = (Tabv.end_sample-Tabv.beg_sample)/fs;
+    Tabv.section  = repmat(f,height(Tabv),1);
+    Tabv = movevars(Tabv, 'end_sample', 'After', 'beg_sample');
+    Tabv.beg_sample(Tabv.beg_sample==0) = 1;
+    % ---------- keep only real blocks ----------
+    txtFiles{f} = Tabv(Tabv.duration>1.5,:);
+
+end
 %%
-cfg = [];
-cfg.channel = 31;
-ft_databrowser([], ftEEG1)
-%%
-fs = EEG1.info.effective_srate;
 idxBeg  = find(strcmp(markers.time_series, 'Background Noise start'));
 idxEnd = find(strcmp(markers.time_series, 'Background Noise stop'));
 % convert marker time to EEG samples 
@@ -43,37 +77,33 @@ trlTable = table(sampBeg', sampEnd',...
     'VariableNames',{'beg_sample', 'end_sample', 'offset', 'section'});
 trlTable.duration = (trlTable.end_sample - trlTable.beg_sample)/fs;
 
-trlTable.ID        = [1, 1, 1, 1, 2, 2, 2, 2]';
-trlTable.frequency = [30, 30, 20, 20, 30, 30, 20, 20]';
-trlTable.beeps     = [1, 0, 1, 0, 1, 0, 1, 0]';
+trlTableNew = table([], [],...
+    [], [],[],[],...
+    'VariableNames',txtFiles{1}.Properties.VariableNames);
 
-trlTable1 = trlTable(1:4,:);
-trlTable2 = trlTable(5:end,:);
-
+for i=1:height(trlTable)
+    x = txtFiles{i};
+    x.beg_sample = x.beg_sample+trlTable{i,"beg_sample"};
+    x.end_sample = x.end_sample+trlTable{i,"beg_sample"};
+    trlTableNew = vertcat(trlTableNew, x);
+end
 %% convert to ft data and redefine trials
+% convert LSL stream to fieldtrip data
+ftEEG = LSL2ft(EEG1);
 % redifine trials
 cfg = [];
-cfg.trl = trlTable1{:,:};
-datTrl1 = ft_redefinetrial(cfg, ftEEG1);
+cfg.trl = trlTable{:,:};
+datTrl = ft_redefinetrial(cfg, ftEEG);
+%clear EEG1
 
-% redifine trials
-cfg = [];
-cfg.trl = trlTable2{:,:};
-datTrl2 = ft_redefinetrial(cfg, ftEEG2);
-
-clear EEG1 EEG2
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% basic preproc
-curEEG = datTrl2;
-
 clc;
 cfg            = [];
 cfg.channel    = 'EEG';
 cfg.detrend    = 'yes';
-cfg.demean     = 'yes';
 cfg.continuous = 'no';
+cfg.hpfilter    = 'yes';
+cfg.hpfreq      = 0.5;
 cfg.reref      = 'yes';
 cfg.refchannel = {'all'}; % A1 and A2 are the ear-clips
 % Notch filters to remove 50Hz and harmonics
@@ -83,7 +113,10 @@ cfg.bsfilttype  = 'but';
 cfg.bsfiltord   = 3; % 3rd order
 cfg.bsfiltdir   = 'twopass'; % zero-phase
 
-pEEG = ft_preprocessing(cfg, curEEG); %p(preprocessed)EEG
+%cfg.dftfilter = 'yes';
+%cfg.dftfreq = [50 100]; % line noise removal
+
+pEEG = ft_preprocessing(cfg, datTrl); %p(preprocessed)EEG
 
 %% high amplitude artifact detection
 cfg = [];
@@ -102,7 +135,7 @@ zEEG = ft_rejectartifact(cfg,pEEG);
 
 %% Manual: View Data
 cfg = [];
-cfg.ylim  = [-50 50];
+cfg.ylim  = [-30 30];
 cfg.blocksize = 30;
 man_artifact = ft_databrowser(cfg,zEEG)
 save([env.paths.artifacts  ID '_man_artifact'], "man_artifact");
@@ -113,11 +146,6 @@ cfg.artfctdef.reject           = 'nan';
 cfg.artfctdef.visual.artifact = man_artifact.artfctdef.visual.artifact;
 mEEG = ft_rejectartifact(cfg,zEEG);
 
-%% Semi automatic artifact rejection: do you use this method???
-cfg        = [];
-cfg.metric = 'zvalue';  % use by default zvalue method
-cfg.method = 'summary'; % use by default summary method
-mEEG       = ft_rejectvisual(cfg,mEEG);
 %% Run ICA
 cfg = [];
 cfg.method  = 'runica';
@@ -141,28 +169,15 @@ cfg = [];
 cfg.component = [1,2];
 dat_after_ICA = ft_rejectcomponent(cfg, comp);
 
-%%
-cfg        = [];
-cfg.metric = 'zvalue';  % use by default zvalue method
-cfg.method = 'summary'; % use by default summary method
-dat_after_ICA = ft_rejectvisual(cfg,dat_after_ICA);
-%%
-cfg = [];
-cfg.badch = {'TP9', 'F7'};
-cfg.section = {{2,'last'}, 'all'};
-cfg.elec = env.EEG.elec;
-cfg.layout = env.EEG.lay;
-cfg.blocksize = 30; 
-dat_after_ICA2 = fixChannels(cfg, dat_after_ICA);
 %% view the data again
 cfg = [];
 cfg.ylim  = [-30 30];
-cfg.blocksize = 30;
+cfg.blocksize = 720;
 man_artifact = ft_databrowser(cfg,dat_after_ICA)
 
 
 %% save data after preproc
-save([env.paths.cleanData 'EEG2_clean.mat'], "dat_after_ICA");
+save([env.paths.cleanData ID '_clean.mat'], "dat_after_ICA");
 disp(['Saved All Data!']);
 
 

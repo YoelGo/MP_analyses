@@ -1,11 +1,12 @@
 %% loading in LSL file and preprocessing the data
 clc; clear all; close all;
-cd('C:\Users\yoelgo\Documents\GitHub\MP_analyses\MirorPods_Pilot1\');
-addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\MirorPods_Pilot1\extra_functions\');
+gitPath = 'C:\Users\yoelgo\Documents\GitHub\MP_analyses\MirorPods_Pilot1\'
+cd(gitpath);
+addpath([gitpath 'extra_functions\']);
 env = setupEnviroment11();
 
 %% Load single participant
-n = 2;
+n = 16;
 ID = extractBefore(env.data.rawFiles(n).name, '_data');
 env.ID = ID;
 env.paths.curData = [env.data.rawFiles(n).folder '\'];
@@ -28,6 +29,12 @@ EEG2    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player2 EEG'), dat1)};
 ftEEG1 = LSL2ft(EEG1);
 ftEEG2 = LSL2ft(EEG2);
 
+% EOG data
+cfg = [];
+cfg.channel = {'TP9', 'TP10'};
+EOG1 = ft_selectdata(cfg,ftEEG1);
+EOG2 = ft_selectdata(cfg,ftEEG2);
+
 % markers
 markers = dat1(cellfun(@(x) strcmp(x.info.name, 'MaxMarkers'), dat1));
 markers = markers{1};
@@ -37,37 +44,54 @@ cfg.ylim  = [-130 130];
 cfg.blocksize = 50;
 ft_databrowser(cfg, ftEEG1)
 %%
-fs = EEG1.info.effective_srate;
-idxBeg  = find(strcmp(markers.time_series, 'Background Noise start'));
-idxEnd = find(strcmp(markers.time_series, 'Background Noise stop'));
-% convert marker time to EEG samples 
+idxBeg = find(contains(markers.time_series, 'start'));
+idxEnd = find(contains(markers.time_series, 'stop'));
+
 sampBeg  = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps(idxBeg));
 sampEnd = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps(idxEnd));
-trlTable = table(sampBeg', sampEnd',...
-    zeros(numel(sampBeg),1), (1:numel(sampBeg))',...
-    'VariableNames',{'beg_sample', 'end_sample', 'offset', 'section'});
-trlTable.duration = (trlTable.end_sample - trlTable.beg_sample)/fs;
 
-trlTable.ID        = [1, 1, 1, 1, 2, 2, 2, 2]';
-trlTable.frequency = [30, 30, 20, 20, 30, 30, 20, 20]';
-trlTable.beeps     = [1, 0, 1, 0, 1, 0, 1, 0]';
+trlTable1 = table(sampBeg', sampEnd',...
+    zeros(numel(sampBeg),1),...
+    'VariableNames',{'beg_sample', 'end_sample', 'offset'});
 
-trlTable1 = trlTable(1:4,:);
-trlTable2 = trlTable(5:end,:);
+sampBeg  = arrayfun(@(t) nearest(EEG2.time_stamps, t), markers.time_stamps(idxBeg));
+sampEnd = arrayfun(@(t) nearest(EEG2.time_stamps, t), markers.time_stamps(idxEnd));
+
+trlTable1 = table(sampBeg', sampEnd',...
+    zeros(numel(sampBeg),1),...
+    'VariableNames',{'beg_sample', 'end_sample', 'offset'});
+
+conditions = extractBefore(markers.time_series(idxBeg),'start');
+
+P = repmat("0",size(conditions));
+P(contains(conditions,"P1"))="P1";
+P(contains(conditions,"P2"))="P2";
+P(contains(conditions,"Dyad"))="Dyad";
+type = strtrim(erase(erase(erase(string(conditions),"P1"),"P2"),"Dyad"));
+type = strtrim(erase(erase(erase(string(conditions),"P1"),"P2"),"Dyad"));
+type(type=="") = "0";
+
+trlTable1.P = P';
+trlTable1.type = type';
+
+trlTable2.P = P';
+trlTable2.type = type';
 
 %% redefine trials
 % redifine trials
 cfg = [];
-cfg.trl = trlTable1{:,:};
+cfg.trl = trlTable1{:,1:3};
 datTrl1 = ft_redefinetrial(cfg, ftEEG1);
 
 % redifine trials
 cfg = [];
-cfg.trl = trlTable2{:,:};
+cfg.trl = trlTable2{:,1:3};
 datTrl2 = ft_redefinetrial(cfg, ftEEG2);
 
 clear EEG1 EEG2
 
+datTrl1.trialinfo = trlTable1(:,4:5);   % keep P and type as table
+datTrl2.trialinfo = trlTable2(:,4:5);   % keep P and type as table
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% basic preproc
@@ -78,7 +102,6 @@ cfg            = [];
 cfg.channel    = 'EEG';
 cfg.detrend    = 'yes';
 cfg.demean     = 'yes';
-cfg.continuous = 'no';
 cfg.reref      = 'yes';
 cfg.refchannel = {'all'}; % A1 and A2 are the ear-clips
 % Notch filters to remove 50Hz and harmonics
@@ -88,7 +111,8 @@ cfg.bsfilttype  = 'but';
 cfg.bsfiltord   = 3; % 3rd order
 cfg.bsfiltdir   = 'twopass'; % zero-phase
 
-pEEG = ft_preprocessing(cfg, curEEG); %p(preprocessed)EEG
+pEEG1 = ft_preprocessing(cfg, datTrl1); %p(preprocessed)EEG
+pEEG2 = ft_preprocessing(cfg, datTrl2); %p(preprocessed)EEG
 
 %% high amplitude artifact detection
 cfg = [];
@@ -106,11 +130,18 @@ cfg.artfctdef.visual.artifact   = z_artifact;
 zEEG = ft_rejectartifact(cfg,pEEG);
 
 %% Manual: View Data
+% 1 or 2
+I = 1;
+
 cfg = [];
 cfg.ylim  = [-50 50];
 cfg.blocksize = 30;
-man_artifact = ft_databrowser(cfg,zEEG)
-save([env.paths.artifacts  ID '_man_artifact'], "man_artifact");
+if I==1
+    man_artifact = ft_databrowser(cfg,pEEG1)
+else
+    man_artifact = ft_databrowser(cfg,pEEG2)
+end
+save([env.paths.artifacts  ID '_man_artifact' num2str(I)], "man_artifact");
 %load([env.paths.artifacts  ID '_man_artifact'], "man_artifact");
 %% Manual: Remove Artifacts
 cfg = []; 

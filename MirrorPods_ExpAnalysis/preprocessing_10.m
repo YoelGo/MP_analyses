@@ -1,0 +1,294 @@
+%% loading in LSL file and preprocessing the data
+clc; clear all; close all;
+% set relevant paths %
+gitPath = 'C:\Users\yoelgo\Documents\GitHub\'; % path of the local GitHub
+cd([gitPath 'MP_analyses\MirrorPods_ExpAnalysis\']); % path of this specific project in Github
+addpath([gitPath 'MP_analyses\extra_functions\']); % add the function in the "extra_functions" folder in the github project
+env = setupEnviroment11(); % a custom function which sets all the paths and prepares the variable enviroment (env) for this experiment
+
+%% Load single participant
+% ***see the participant number at env.data.rawFiles***
+n = 15;
+
+% find the participant ID
+ID = extractBefore(env.data.rawFiles(n).name, '_data');
+env.ID = ID;
+env.paths.curData = [env.data.rawFiles(n).folder '\'];
+
+% load data
+dat1 = load_xdf([env.paths.curData  env.data.rawFiles(n).name]);
+
+%% divide into the different LSL streams
+% EEG of player 1 and 2
+EEG1    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player1 EEG'), dat1)};
+EEG2    = dat1{cellfun(@(x) strcmp(x.info.name, 'Player2 EEG'), dat1)};
+
+% convert LSL stream to fieldtrip data
+ftEEG1 = LSL2ft(EEG1);
+ftEEG2 = LSL2ft(EEG2);
+
+% take EOG data for inspection
+cfg = [];
+cfg.channel = {'TP10'};
+EOG1 = ft_selectdata(cfg,ftEEG1);
+EOG2 = ft_selectdata(cfg,ftEEG2);
+
+% markers
+markers = dat1(cellfun(@(x) strcmp(x.info.name, 'MaxMarkers'), dat1));
+markers = markers{1};
+
+%% inspect EoG data
+cfg = [];
+cfg.ylim  = [-850 850];
+cfg.blocksize = 50;
+cfg.preproc.demean = 'yes'
+ft_databrowser(cfg, EOG1) % change to EOG1/EOG2
+
+%% first look at the data
+cfg = [];
+cfg.ylim  = [-130 130];
+cfg.channel = {'all' '-TP10'}; % look at data without ECG
+cfg.preproc.demean = 'yes';
+cfg.blocksize = 50;
+ft_databrowser(cfg, ftEEG1)
+%%
+idxBeg = find(contains(markers.time_series, 'start'));
+idxEnd = find(contains(markers.time_series, 'stop'));
+
+sampBeg  = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps(idxBeg));
+sampEnd = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps(idxEnd));
+
+trlTable1 = table(sampBeg', sampEnd',...
+    zeros(numel(sampBeg),1),...
+    'VariableNames',{'beg_sample', 'end_sample', 'offset'});
+
+sampBeg  = arrayfun(@(t) nearest(EEG2.time_stamps, t), markers.time_stamps(idxBeg));
+sampEnd = arrayfun(@(t) nearest(EEG2.time_stamps, t), markers.time_stamps(idxEnd));
+
+trlTable2 = table(sampBeg', sampEnd',...
+    zeros(numel(sampBeg),1),...
+    'VariableNames',{'beg_sample', 'end_sample', 'offset'});
+
+% find the different conditions from the markers
+conditions = extractBefore(markers.time_series(idxBeg),'start');
+% find the participant (P1/P2/dyad)
+P = repmat("0",size(conditions));
+P(contains(conditions,"P1"))="P1";
+P(contains(conditions,"P2"))="P2";
+P(contains(conditions,"Dyad"))="Dyad";
+% find the condition type
+type = strtrim(erase(erase(erase(string(conditions),"P1"),"P2"),"Dyad"));
+type = strtrim(erase(erase(erase(string(conditions),"P1"),"P2"),"Dyad"));
+type(type=="") = "0";
+
+trlTable1.P = P';
+trlTable1.type = type';
+
+trlTable2.P = P';
+trlTable2.type = type';
+
+%% redefine trials
+% redifine trials for EEG1
+cfg = [];
+cfg.trl = trlTable1{:,1:3};
+datTrl1 = ft_redefinetrial(cfg, ftEEG1);
+
+% redifine trials for EEG2
+cfg = [];
+cfg.trl = trlTable2{:,1:3};
+datTrl2 = ft_redefinetrial(cfg, ftEEG2);
+
+clear EEG1 EEG2
+
+datTrl1.trialinfo = trlTable1(:,4:5);   % keep P and type as table
+datTrl2.trialinfo = trlTable2(:,4:5);   % keep P and type as table
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% basic preproc
+% first keep the EOG to add later
+cfg = [];
+cfg.channel = 'TP9';
+cfg.demean = 'yes';
+EOG1 = ft_preprocessing(cfg,datTrl1);
+EOG2 = ft_preprocessing(cfg,datTrl2);
+
+clc;
+cfg            = [];
+cfg.channel    = {'EEG', '-TP10','-TP9'} ; % remove EOG and ECG for refferencing
+cfg.detrend    = 'yes';
+cfg.demean     = 'yes';
+cfg.reref      = 'yes';
+cfg.refchannel = {'all'}; % A1 and A2 are the ear-clips
+% Notch filters to remove 50Hz and harmonics
+cfg.bsfilter    = 'yes';
+cfg.bsfreq      = [49 51; 99 101];
+cfg.bsfilttype  = 'but';
+cfg.bsfiltord   = 3; % 3rd order
+cfg.bsfiltdir   = 'twopass'; % zero-phase
+
+pEEG1 = ft_preprocessing(cfg, datTrl1); %p(preprocessed)EEG
+pEEG2 = ft_preprocessing(cfg, datTrl2); %p(preprocessed)EEG
+
+% add EoG back
+pEEG1 = ft_appenddata([],pEEG1,EOG1);
+pEEG2 = ft_appenddata([],pEEG2,EOG2);
+%% Manual: View Data
+% participant 1 or 2
+I = 1;
+
+if I == 1
+    curDat = pEEG1;
+else
+    curDat = pEEG2;
+end
+
+cfg = [];
+cfg.ylim  = [-50 50];
+cfg.continuous = 'yes';
+cfg.blocksize = 30;
+
+man_artifact = ft_databrowser(cfg,curDat)
+
+save([env.paths.artifacts  ID '_man_artifact' num2str(I)], "man_artifact");
+%load([env.paths.artifacts  ID '_man_artifact'], "man_artifact");
+%% Manual: Remove Artifacts
+cfg = []; 
+cfg.artfctdef.reject           = 'nan';
+cfg.artfctdef.visual.artifact = man_artifact.artfctdef.visual.artifact;
+mEEG = ft_rejectartifact(cfg,curDat);
+
+%% check for further noisy channels
+cfg        = [];
+cfg.metric = 'zvalue';  % use by default zvalue method
+cfg.method = 'summary'; % use by default summary method
+mEEG       = ft_rejectvisual(cfg,mEEG);
+
+%mEEG.label(14)         % dicsover the channel from the number
+
+%% remove noisy channels to be interpolated later.
+badCh = {'T8'};
+
+if exist('badCh','var') && ~isempty(badCh{1})
+    cfg = [];
+    cfg.channel = badCh;
+    badChDat = ft_selectdata(cfg,mEEG);
+
+    cfg = [];
+    cfg.channel = {'all', '-TP9', strcat('-', badCh{:})};
+    mEEG = ft_selectdata(cfg, mEEG);
+else
+    warning('No bad channels to interpolate?');
+end
+%% Run ICA
+cfg = [];
+cfg.method  = 'runica';
+cfg.channel = {'all' '-TP9'}; % EEG no EoG, no badch
+cfg.numcomponent = 20;
+cfg.runica.maxsteps = 10;
+comp = ft_componentanalysis(cfg, mEEG);
+%% view ICA components
+% view time seriers and topopraphy of ICs
+cfg = [];
+cfg.viewmode = 'component';
+cfg.allowoverlap = 'yes';
+cfg.blocksize = 30;
+cfg.layout = env.EEG.lay;
+ft_databrowser(cfg,comp);
+
+%% reject components
+cfg = [];
+cfg.component = [9];
+dat_after_ICA = ft_rejectcomponent(cfg, comp);
+
+%% reintroduce the bad channels and interpolate them
+% reintroduce the bad channels
+dat_after_ICA = ft_appenddata([], dat_after_ICA, badChDat);
+
+% interpolate the bad channels using a custom function. see notation iside.
+cfg = [];
+cfg.badch = badCh;
+cfg.section = {{2,'last'}};
+cfg.elec = env.EEG.elec;
+cfg.layout = env.EEG.lay;
+cfg.blocksize = 30; 
+dat_after_ICA = fixChannels(cfg, dat_after_ICA);
+%%
+cfg        = [];
+cfg.metric = 'zvalue';  % use by default zvalue method
+cfg.method = 'summary'; % use by default summary method
+dat_after_ICA = ft_rejectvisual(cfg,dat_after_ICA);
+
+%% view the data again
+cfg = [];
+cfg.ylim  = [-30 30];
+cfg.continuous = 'yes';
+cfg.blocksize = 30;
+man_artifact = ft_databrowser(cfg,dat_after_ICA)
+
+
+%% save data after preproc
+save([env.paths.cleanData 'EEG2_clean.mat'], "dat_after_ICA");
+disp(['Saved All Data!']);
+
+
+
+
+
+
+
+
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  DUMP  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% divide into trials based on the markers
+begIdx  = find(strcmp(markers.time_series, 'Background Noise start'));
+stopIdx = find(strcmp(markers.time_series, 'Background Noise stop'));
+
+% convert TIME → SAMPLE
+begSamp  = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps(begIdx));
+stopSamp = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps(stopIdx));
+allSamp  = arrayfun(@(t) nearest(EEG1.time_stamps, t), markers.time_stamps);
+section = zeros(numel(markers.time_series),1);
+
+
+for k = 1:numel(begIdx)
+    section(begIdx(k):stopIdx(k)) = k;
+end
+
+trltable = table( ...
+    allSamp', ...
+    zeros(numel(markers.time_stamps),1), ...
+    zeros(numel(markers.time_stamps),1), ...
+    section,...
+    markers.time_series(:),...
+    'VariableNames', {'beg_sample', 'end_sample', 'offset', 'section','type'} );
+
+% make every 2nd ection the end sample of the previous one.
+trltable.end_sample(1:end-1) = trltable.beg_sample(2:end);
+
+% find the bpm values from the vector
+bpm    = bpmInfo.time_series(13,:);
+bpm    = bpm([true, diff(bpm) ~= 0]);
+% remove any number that is not in the bpm values (112/129)
+bpm    = bpm(find(bpm == 112 | bpm == 129));
+% add 'no bpm' conditions
+bpm = reshape([bpm; zeros(size(bpm))], 1, []);
+
+trltable.bpm = [0 bpm(1:end-1)]';
+%
+% remove unwanted lines
+trltable = trltable(1:end-1,:);
+trltable = trltable(trltable.beg_sample ~= trltable.end_sample,:);
+% fix overlapping problem caused by one trial ending when other begins.
+trltable.beg_sample(2:end) = trltable.beg_sample(2:end)+1;
+%trltable.type = [];
+
+% add block duration (sec)
+trltable.duration = (trltable.end_sample - trltable.beg_sample)/EEG1.info.effective_srate;
