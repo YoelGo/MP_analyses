@@ -1,7 +1,9 @@
 function [env] = setupEnviroment11()
 
 %%%%% these paths need to be adjusted %%%%%
-dataAyelet          = 'Z:\';
+dataAyelet          = 'Z:\';  % Change to your DataAyelet Path
+
+
 yoelpath            = [dataAyelet 'Experiments\Yoel\'];
 toolsPath           = [yoelpath 'tools\'];
 fieldtrip_path      = [toolsPath 'fieldtrip-20250106\'];

@@ -1,4 +1,4 @@
-function [data_win, windowSummary] = NaN_windowing(cfg, data)
+function [data_win, windowSummary] = NaN_windowingfunc(cfg, data)
 % Split FieldTrip data into windows and remove NaN windows
 %
 % cfg.winlen  - window length (sec)

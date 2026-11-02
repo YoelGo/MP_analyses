@@ -1,8 +1,11 @@
 %% loading in LSL file and preprocessing the data
 clc; clear all; close all;
-cd('C:\Users\yoelgo\Documents\GitHub\MP_analyses\');
-addpath('C:\Users\yoelgo\Documents\GitHub\MP_analyses\extra_functions\');
-env = setupEnviroment11();
+% set relevant paths %
+gitPath = 'C:\Users\yoelgo\Documents\GitHub\'; % path of the local GitHub
+cd([gitPath 'MP_analyses\MirrorPods_ExpAnalysis\']); % path of this specific project in Github
+addpath([gitPath 'MP_analyses\extra_functions\']); % add the function in the "extra_functions" folder in the github project
+env = setupEnviroment11(); % a custom function which sets all the paths and prepares the variable enviroment (env) for this experiment
+clear gitPath
 
 %%
 n = 1;
